@@ -40,6 +40,7 @@ Sonic_Main:	; Routine 0
 
 ; Obj01_Control:
 Sonic_Control:	; Routine 2
+        bsr    Sonic_PanCamera
 		tst.w	(f_debugmode).w	; is debug cheat enabled?
 		beq.s	.nodebug	; if not, branch
 		btst	#bitB,(v_jpadpress1).w ; is button B pressed?
@@ -242,6 +243,8 @@ Sonic_Water:
 
 ; Obj01_MdNormal:
 Sonic_MdNormal:
+        bsr.w   Sonic_Peelout
+		bsr.w	Sonic_SpinDash
 		bsr.w	Sonic_Jump
 		bsr.w	Sonic_SlopeResist
 		bsr.w	Sonic_Move
@@ -255,6 +258,7 @@ Sonic_MdNormal:
 
 ; Obj01_MdJump:
 Sonic_MdJump:
+		clr.b	spindash_flag(a0)
 		bsr.w	Sonic_JumpHeight
 		bsr.w	Sonic_JumpDirection
 		bsr.w	Sonic_LevelBound
@@ -283,6 +287,7 @@ Sonic_MdRoll:
 
 ; Obj01_MdJump2:
 Sonic_MdJump2:
+		clr.b	spindash_flag(a0)
 		bsr.w	Sonic_JumpHeight
 		bsr.w	Sonic_JumpDirection
 		bsr.w	Sonic_LevelBound
@@ -492,16 +497,18 @@ locret_1307C:
 
 ; ||||||||||||||| S U B R O U T I N E |||||||||||||||||||||||||||||||||||||||
 
+; ||||||||||||||| S U B R O U T I N E |||||||||||||||||||||||||||||||||||||||
+
 Sonic_MoveLeft:
-		move.w	obInertia(a0),d0
+		move.w	$14(a0),d0
 		beq.s	loc_13086
 		bpl.s	loc_130B2
 
 loc_13086:
-		bset	#0,obStatus(a0)
+		bset	#0,$22(a0)
 		bne.s	loc_1309A
-		bclr	#5,obStatus(a0)
-		move.b	#id_Run,obPrevAni(a0) ; restart Sonic's animation
+		bclr	#5,$22(a0)
+		move.b	#1,$1D(a0)	; restart Sonic's animation
 
 loc_1309A:
 		sub.w	d5,d0
@@ -509,11 +516,14 @@ loc_1309A:
 		neg.w	d1
 		cmp.w	d1,d0
 		bgt.s	loc_130A6
+		add.w	d5,d0		; +++ remove this frame's acceleration change
+		cmp.w	d1,d0		; +++ compare speed with top speed
+		ble.s	loc_130A6	; +++ if speed was already greater than the maximum, branch
 		move.w	d1,d0
 
 loc_130A6:
-		move.w	d0,obInertia(a0)
-		move.b	#id_Walk,obAnim(a0) ; use walking animation
+		move.w	d0,$14(a0)
+		move.b	#0,$1C(a0)	; use walking animation
 		rts
 ; ===========================================================================
 
@@ -544,22 +554,25 @@ locret_130E8:
 
 
 Sonic_MoveRight:
-		move.w	obInertia(a0),d0
+		move.w	$14(a0),d0
 		bmi.s	loc_13118
-		bclr	#0,obStatus(a0)
+		bclr	#0,$22(a0)
 		beq.s	loc_13104
-		bclr	#5,obStatus(a0)
-		move.b	#id_Run,obPrevAni(a0) ; restart Sonic's animation
+		bclr	#5,$22(a0)
+		move.b	#1,$1D(a0)	; restart Sonic's animation
 
 loc_13104:
 		add.w	d5,d0
 		cmp.w	d6,d0
 		blt.s	loc_1310C
+		sub.w	d5,d0		; +++ remove this frame's acceleration change
+		cmp.w	d6,d0		; +++ compare speed with top speed
+		bge.s	loc_1310C	; +++ if speed was already greater than the maximum, branch
 		move.w	d6,d0
 
 loc_1310C:
-		move.w	d0,obInertia(a0)
-		move.b	#id_Walk,obAnim(a0) ; use walking animation
+		move.w	d0,$14(a0)
+		move.b	#0,$1C(a0)	; use walking animation
 		rts
 ; ===========================================================================
 
@@ -712,6 +725,67 @@ loc_13242:
 ; End of function Sonic_RollRight
 
 ; ---------------------------------------------------------------------------
+; Subroutine allowing Sonic to use his Dash (trademark do not take this joke seriously)
+; ---------------------------------------------------------------------------
+
+; ||||||||||||||| S U B R O U T I N E |||||||||||||||||||||||||||||||||||||||
+
+Sonic_Peelout:
+        btst     #1,$39(a0)             ; is peelout currently being charged up?
+        bne.s    .charge_peelout        ; if yes, branch to a different code section
+     
+        ; peelout init check
+        btst     #bitUp,(v_jpadhold2).w ; is the Up button held?
+        beq.s    .nopeel                ; if not, branch
+        moveq    #btnABC,d0             ; are buttons ABC...
+        and.b    (v_jpadpress2).w,d0    ; ...pressed?
+        beq.s    .nopeel                ; if not, branch
+        cmpi.b   #id_LookUp,obAnim(a0)  ; is Sonic in his looking-up animation?
+        bne.s    .nopeel                ; if not, branch
+        bset     #1,$39(a0)             ; set spindash/peelout flag
+        clr.b    obAnim(a0)             ; reset Sonic's animation
+        addq.l   #4,sp                  ; skip rest in MdNormal
+        move.w   #sfx_Dash,d0           ; play roll sound
+        jmp      (QueueSound2).l        ; (will be replaced later)
+.nopeel:
+        rts
+; ===========================================================================
+
+.charge_peelout:
+        btst     #bitUp,(v_jpadhold2).w ; is the Up button STILL held?
+        beq.s    .release_peelout       ; if not, release peelout
+
+        add.w    #$40,obInertia(a0)     ; add $40 charge to peelout speed per frame
+        move.w   #$1000,d0              ; define max speed
+        cmp.w    obInertia(a0),d0       ; did charge speed exceed maximum?
+        bge.s    .nocap                 ; if not, branch
+        move.w   d0,obInertia(a0)       ; cap max speed
+.nocap:
+ 
+        bsr.w    Sonic_LevelBound       ; keep checking for level boundaries
+        bsr.w    Sonic_AnglePos         ; make sure Sonic uses the correct angled sprites on a slope
+        move.w   #$60,(v_lookshift).w   ; reset looking up/down
+        addq.l   #4,sp                  ; skip rest in MdNormal
+        rts                             ; don't do anything else
+; ===========================================================================
+
+.release_peelout:
+        cmpi.w   #$600,obInertia(a0)    ; was minimum speed reached?
+        bge.s    .speedok               ; if yes, branch
+        clr.w    obInertia(a0)          ; kill whatever little speed we've built up
+        clr.b    $39(a0)                ; reset spindash/peelout flag
+        rts                             ; don't do anything else
+.speedok:
+        btst     #0,obStatus(a0)        ; is Sonic looking to the left?
+        beq.s    .notleft               ; if not, branch
+        neg.w    obInertia(a0)          ; negate final speed
+.notleft:
+        clr.b    $39(a0)                ; reset spindash/peelout flag
+        move.w   #sfx_DashRelease,d0       ; play teleport/dash sound
+        jmp      (QueueSound2).l
+; End of function Sonic_Peelout
+
+; ---------------------------------------------------------------------------
 ; Subroutine to change Sonic's direction while jumping
 ; ---------------------------------------------------------------------------
 
@@ -855,14 +929,23 @@ Sonic_LevelBound:
 
 ; Boundary_Bottom
 .bottom:
+		move.w	(v_limitbtm1).w,d0 
+		move.w	(v_limitbtm2).w,d1 
+		cmp.w	d0,d1		; screen still scrolling down? 
+		blt.s	.dontkill	; if so, don't kill Sonic
 		cmpi.w	#(id_SBZ<<8)+1,(v_zone).w ; is level SBZ2 ?
 		bne.w	KillSonic	; if not, kill Sonic
 		cmpi.w	#$2000,(v_player+obX).w
 		blo.w	KillSonic
-		clr.b	(v_lastlamp).w	; clear lamppost counter
+		clr.b	(v_lastlamp).w	; clear	lamppost counter
 		move.w	#1,(f_restart).w ; restart the level
 		move.w	#(id_LZ<<8)+3,(v_zone).w ; set level to SBZ3 (LZ4)
+		rts	
+; ===========================================================================
+
+.dontkill: 
 		rts
+
 ; ===========================================================================
 
 ; Boundary_Sides
@@ -873,6 +956,89 @@ Sonic_LevelBound:
 		move.w	#0,obInertia(a0)
 		bra.s	.chkbottom
 ; End of function Sonic_LevelBound
+
+; ---------------------------------------------------------------------------
+; Subroutine to horizontally pan the camera view ahead of the player
+; (Ported from the US version of Sonic CD's "R11A__.MMD" by Nat The Porcupine)
+; ---------------------------------------------------------------------------
+
+; ||||||||||||||| S U B    R O U T I N E |||||||||||||||||||||||||||||||||||||||
+
+
+Sonic_PanCamera:
+		move.w	(v_camera_pan).w,d1		; get the current camera pan value
+
+		move.w	obInertia(a0),d0		; get Sonic's ground speed
+		btst	#1,obStatus(a0)			; is Sonic airborne?
+		beq.s	is_grounded			; if not, branch
+		move.w	obVelX(a0),d0			; use X velocity instead if airborne
+
+	is_grounded:
+		tst.w	d0				; check if speed is positive
+		spl.b	d2				; remember whether our value was positive or negative (needed a bit further down below)
+		bpl.s	abs_speed			; if yes, branch
+		neg.w	d0				; otherwise, convert speed to an absolute value
+
+	abs_speed:
+
+; These lines were intended to prevent the Camera from panning while
+; going up the very first giant ramp in Palmtree Panic Zone Act 1.
+; However, given that no such object exists in Sonic 1, I just went
+; ahead and commented these out.
+;        btst    #1,$2C(a0)                ; is sonic going up a giant ramp in PPZ?
+;        beq.s    skip                    ; if not, branch
+;        cmpi.w    #$1B00,obX(a0)            ; is sonic's x position lower than $1B00?
+;        bcs.s    reset_pan                ; if so, branch
+
+; These lines aren't part of the original routine; I added them myself.
+; If you've ported the Spin Dash, uncomment the following lines of code
+; to allow the camera to pan ahead while charging the Spin Dash:
+        tst.b    $39(a0)                    ; is sonic charging up a spin dash?
+        beq.s    skip                    ; if not, branch
+        btst    #0,obStatus(a0)            ; check the direction that sonic is facing
+        bne.s    pan_right                ; if he's facing right, pan the camera to the right
+        bra.s    pan_left                ; otherwise, pan the camera to the left
+
+    skip:
+        cmpi.w    #$600,d0                ; is sonic's inertia greater than $600
+        bcs.s    reset_pan                ; if not, recenter the screen (if needed)
+        tst.b    d2	  	          ; check if the direction was positive or negative
+        bne.s    pan_left                ; if the direction was positive, then speed was negative, so we pan the screen left
+
+    pan_right:
+        addq.w    #2,d1                    ; add 2 to the pan value
+        cmpi.w    #224,d1                    ; is the pan value greater than 224 pixels?
+        bcs.s    update_pan                ; if not, branch
+        move.w    #224,d1                    ; otherwise, cap the value at the maximum of 224 pixels
+        bra.s    update_pan                ; branch
+; ---------------------------------------------------------------------------
+
+    pan_left:
+        subq.w    #2,d1                    ; subtract 2 from the pan value
+        cmpi.w    #96,d1                    ; is the pan value less than 96 pixels?
+        bcc.s    update_pan                ; if not, branch
+        move.w    #96,d1                    ; otherwise, cap the value at the minimum of 96 pixels
+        bra.s    update_pan                ; branch
+; ---------------------------------------------------------------------------
+
+    reset_pan:
+        cmpi.w    #160,d1                    ; is the pan value 160 pixels?
+        beq.s    update_pan                ; if so, branch
+        bcc.s    reset_left                ; otherwise, branch if it greater than 160
+     
+    reset_right:
+        addq.w    #2,d1                    ; add 2 to the pan value
+        bra.s    update_pan                ; branch
+; ---------------------------------------------------------------------------
+
+    reset_left:
+        subq.w    #2,d1                    ; subtract 2 from the pan value
+
+    update_pan:
+        move.w    d1,(v_camera_pan).w        ; update the camera pan value
+        rts                                ; return
+     
+; End of function Sonic_PanCamera
 
 ; ---------------------------------------------------------------------------
 ; Subroutine allowing Sonic to roll when he's moving
@@ -980,7 +1146,6 @@ Sonic_Jump:
 		rts
 
 .rolljump:
-		bset	#4,obStatus(a0)	; set roll-jump flag.
 		rts
 ; End of function Sonic_Jump
 
@@ -1018,6 +1183,130 @@ Sonic_JumpHeight:
 .return2:
 		rts
 ; End of function Sonic_JumpHeight
+
+; ---------------------------------------------------------------------------
+; Subroutine to check for starting to charge a spindash
+; ---------------------------------------------------------------------------
+
+; ||||||||||||||| S U B R O U T I N E |||||||||||||||||||||||||||||||||||||||
+
+
+Sonic_SpinDash:
+		tst.b	spindash_flag(a0)
+		bne.s	Sonic_UpdateSpindash
+		cmpi.b	#id_Duck,obAnim(a0)
+		bne.s	return_1AC8C
+		move.b	(v_jpadpress2).w,d0
+		andi.b	#btnB|btnC|btnA,d0
+		beq.w	return_1AC8C
+		move.b	#id_Roll,obAnim(a0)
+		move.w	#sfx_Dash,d0
+		jsr	(QueueSound1).l
+		addq.l	#4,sp
+		move.b	#1,spindash_flag(a0)
+		move.w	#0,spindash_counter(a0)
+		cmpi.b	#12,obSubtype(a0)	; if he's drowning, branch to not make dust
+		blo.s	+
+		move.b	#2,(v_spindust+obAnim).w
++
+		bsr.w	Sonic_LevelBound
+		bsr.w	Sonic_AnglePos
+
+return_1AC8C:
+		rts
+; End of function Sonic_SpinDash
+
+
+; ---------------------------------------------------------------------------
+; Subroutine to update an already-charging spindash
+; ---------------------------------------------------------------------------
+
+; ||||||||||||||| S U B R O U T I N E |||||||||||||||||||||||||||||||||||||||
+
+
+Sonic_UpdateSpindash:
+		move.b	(v_jpadhold2).w,d0 
+		btst	#bitDn,d0
+		bne.w	Sonic_ChargingSpindash
+
+		; unleash the charged spindash and start rolling quickly:
+		move.b	#$E,obHeight(a0)
+		move.b	#7,obWidth(a0)
+		move.b	#id_Roll,obAnim(a0)
+		addq.w	#5,obY(a0)	; add the difference between Sonic's rolling and standing heights
+		move.b	#0,spindash_flag(a0)
+		moveq	#0,d0
+		move.b	spindash_counter(a0),d0
+		add.w	d0,d0
+		move.w	SpindashSpeeds(pc,d0.w),obInertia(a0)
+
+		; Determine how long to lag the camera for.
+		; Notably, the faster Sonic goes, the less the camera lags.
+		; This is seemingly to prevent Sonic from going off-screen.
+		move.w	obInertia(a0),d0
+		subi.w	#$800,d0 ; $800 is the lowest spin dash speed
+		add.w	d0,d0
+		andi.w	#$1F00,d0 ; This line is not necessary, as none of the removed bits are ever set in the first place
+		neg.w	d0
+		addi.w	#$2000,d0
+		move.w	d0,($FFFFEED0).w
+
+		btst	#0,obStatus(a0)
+		beq.s	+
+		neg.w	obInertia(a0)
++
+		bset	#2,obStatus(a0)
+		move.b	#0,(v_spindust+obAnim).w 
+		move.w	#sfx_DashRelease,d0	; spindash zoom sound
+		jsr	(QueueSound1).l 
+		bra.s	Sonic_Spindash_ResetScr
+; ===========================================================================
+SpindashSpeeds:
+		dc.w  $800	; 0
+		dc.w  $880	; 1
+		dc.w  $900	; 2
+		dc.w  $980	; 3
+		dc.w  $A00	; 4
+		dc.w  $A80	; 5
+		dc.w  $B00	; 6
+		dc.w  $B80	; 7
+		dc.w  $C00	; 8
+; ===========================================================================
+
+Sonic_ChargingSpindash:			; If still charging the dash...
+		tst.w	spindash_counter(a0)
+		beq.s	+
+		move.w	spindash_counter(a0),d0
+		lsr.w	#5,d0
+		sub.w	d0,spindash_counter(a0)
+		bcc.s	+
+		move.w	#0,spindash_counter(a0)
++
+		move.b	(v_jpadpress2).w,d0 
+		andi.b	#btnB|btnC|btnA,d0
+		beq.w	Sonic_Spindash_ResetScr
+		move.w	#(id_Roll<<8)|(id_Walk<<0),obAnim(a0)
+		move.w	#sfx_Dash,d0
+		jsr	(QueueSound1).l
+		addi.w	#$200,spindash_counter(a0)
+		cmpi.w	#$800,spindash_counter(a0)
+		blo.s	Sonic_Spindash_ResetScr
+		move.w	#$800,spindash_counter(a0)
+
+Sonic_Spindash_ResetScr:
+		addq.l	#4,sp
+		cmpi.w	#(224/2)-16,($FFFFEED8).w
+		beq.s	loc_1AD8C
+		bhs.s	+
+		addq.w	#4,($FFFFEED8).w
++		subq.w	#2,($FFFFEED8).w
+
+loc_1AD8C:
+		bsr.w	Sonic_LevelBound
+		bsr.w	Sonic_AnglePos
+		move.w	#$60,(v_lookshift).w
+		rts
+; End of function Sonic_UpdateSpindash
 
 ; ---------------------------------------------------------------------------
 ; Subroutine to slow Sonic walking up a slope
@@ -1721,8 +2010,12 @@ Sonic_Animate:
 		neg.w	d2		; modulus speed
 
 .nomodspeed:
-		lea	(SonAni_Run).l,a1 ; use running animation
-		cmpi.w	#$600,d2	; is Sonic at running speed?
+        lea  (SonAni_Peelout).l,a1 ; use peelout animation
+        cmpi.w   #$A00,d2	; is Sonic at running speed?
+		bhs.s	.running	; if yes, branch
+
+        lea  (SonAni_Run).l,a1 ; use peelout animation
+        cmpi.w   #$600,d2	; is Sonic at running speed?
 		bhs.s	.running	; if yes, branch
 
 		lea	(SonAni_Walk).l,a1 ; use walking animation

@@ -132,6 +132,8 @@ flashtime:	equ $30	; time between flashes after getting hit
 invtime:	equ $32	; time left for invincibility
 shoetime:	equ $34	; time left for speed shoes
 stick_to_convex:equ objoff_38
+spindash_flag:	equ $39	; spin dash flag
+spindash_counter:	equ $3A	; spin dash counter
 standonobject:	equ $3D	; object Sonic stands on
 
 ; Miscellaneous object scratch-RAM
@@ -248,9 +250,13 @@ sfx__Last:	equ ((ptr_sndend-SoundIndex-4)/4)+sfx__First
 ; Special sound effects
 spec__First:	equ $D0
 sfx_Waterfall:	equ ((ptr_sndD0-SpecSoundIndex)/4)+spec__First
+sfx_Dash:	equ ((ptr_sndD1-SoundIndex)/4)+sfx__First
+sfx_DashRelease:	equ ((ptr_sndD2-SoundIndex)/4)+sfx__First
 spec__Last:	equ ((ptr_specend-SpecSoundIndex-4)/4)+spec__First
 
-flg__First:	equ $E0
+
+
+flg__First:	equ $FB
 bgm_Fade:	equ ((ptr_flgE0-Sound_ExIndex)/4)+flg__First
 sfx_Sega:	equ ((ptr_flgE1-Sound_ExIndex)/4)+flg__First
 bgm_Speedup:	equ ((ptr_flgE2-Sound_ExIndex)/4)+flg__First
@@ -347,6 +353,22 @@ fr_Float6:	equ $54
 fr_Injury:	equ $55
 fr_GetAir:	equ $56
 fr_WaterSlide:	equ $57
+fr_Peelout11: equ $58
+fr_Peelout12: equ $59
+fr_Peelout13: equ $5A
+fr_Peelout14: equ $5B
+fr_Peelout21: equ $5C
+fr_Peelout22: equ $5D
+fr_Peelout23: equ $5E
+fr_Peelout24: equ $5F
+fr_Peelout31: equ $60
+fr_Peelout32: equ $61
+fr_Peelout33: equ $62
+fr_Peelout34: equ $63
+fr_Peelout41: equ $64
+fr_Peelout42: equ $65
+fr_Peelout43: equ $66
+fr_Peelout44: equ $67
 
 ; Boss locations
 ; The main values are based on where the camera boundaries mainly lie
